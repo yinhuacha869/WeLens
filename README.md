@@ -43,6 +43,89 @@ WeLens 是一个桌面小助手：常驻一个可拖动的悬浮球，让电脑�
 - **启动设置**：是否随 WeLens 自动启动服务、是否开机自启。
 - 底部：打开日志目录、退出 WeLens。
 
+## MCP 工具列表
+
+WeLens 向 AI 客户端提供 5 个只读工具。所有工具返回统一信封：成功为 `{ "ok": true, "data": ... }`，失败为 `{ "ok": false, "error": { "code", "message" } }`。
+
+### 调用流程
+
+`get_login_accounts` 取 `wx_id` → `get_sessions` 取 `session_id` → `get_messages` 取聊天记录（翻页用返回的 `next_cursor`）→ `decrypt_media` 取图片/语音/表情的本地文件。
+
+### 1. get_login_accounts
+
+获取本机微信登录账号列表（含历史登录账号），无需参数。返回 `items[].wxId / name / number`，其中 `wxId` 是其他所有工具的必填参数。
+
+### 2. get_sessions
+
+获取会话列表，按最后消息时间倒序（默认不含公众号）。
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `wx_id` | 是 | 登录用户微信 ID，来自 get_login_accounts |
+| `limit` | 否 | 返回条数 1-100，默认 20 |
+| `cursor` | 否 | 分页游标，来自上一次返回的 `next_cursor` |
+| `updated_after` | 否 | Unix 秒，仅返回该时间后有新消息的会话；0 表示不限 |
+| `include_official` | 否 | 是否包含公众号会话，默认 false |
+| `keyword` | 否 | 按昵称、备注、微信号或会话标题搜索 |
+
+返回项：`sessionId`、`name`、`type`（`single` 单聊 / `group` 群聊 / `official` 公众号）、`lastMessagePreview`、`lastMessageAt`（Unix 秒）、`unreadCount`。
+
+### 3. get_contacts
+
+获取联系人与群聊资料；`contactId` 即群聊的 `session_id`，可直接用于 get_messages。
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `wx_id` | 是 | 登录用户微信 ID |
+| `limit` | 否 | 返回条数 1-100，默认 20 |
+| `cursor` | 否 | 分页游标 |
+| `keyword` | 否 | 模糊匹配昵称、备注、微信号 |
+| `type` | 否 | `friend` 普通联系人（默认）/ `group` 群聊 / `all` 全部（不含群成员） |
+| `only_starred` | 否 | 仅返回星标联系人，默认 false |
+
+返回项：`contactId`、`type`、`nickname`、`remark`、`alias`（微信号）、`region`、`signature`、`isStarred`。
+
+### 4. get_messages
+
+读取某个会话的聊天记录，默认按时间从新到旧返回。
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `wx_id` | 是 | 登录用户微信 ID |
+| `session_id` | 是 | 会话 ID，来自 get_sessions 的 `sessionId` 或 get_contacts 的 `contactId` |
+| `start_time` | 否 | Unix 秒，只返回该时间之后（含）的消息 |
+| `end_time` | 否 | Unix 秒，只返回该时间之前（含）的消息 |
+| `keyword` | 否 | 仅匹配文本消息内容 |
+| `limit` | 否 | 返回条数 1-200，默认 50 |
+| `cursor` | 否 | 分页游标，来自上一次返回的 `next_cursor` |
+| `direction` | 否 | `older` 向更早翻（默认）/ `newer` 向更新翻 |
+
+返回项：`messageId`、`senderId`、`senderName`、`type`（text/image/voice/video/sticker/file/card/location/system/other）、`content`、`timestamp`（Unix 秒）、`isSelf`，并附会话概要 `session`。
+
+### 5. decrypt_media
+
+解密某条消息中的媒体文件（仅支持 image / voice / sticker），返回本地文件路径，重复调用命中缓存。
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `wx_id` | 是 | 登录用户微信 ID |
+| `session_id` | 是 | 会话 ID |
+| `server_id` | 是 | 消息 ID，即 get_messages 返回的 `messageId`（字符串） |
+
+返回项：`media_type`、`content_type`（如 `image/jpeg`、`audio/mpeg`）、`path`（本地已解密文件路径）。
+
+### 常见错误码
+
+| 错误码 | 含义 |
+| --- | --- |
+| `INVALID_PARAMS` | 参数缺失或取值不合法 |
+| `SESSION_NOT_FOUND` | 会话不存在 |
+| `MESSAGE_NOT_FOUND` | 消息不存在 |
+| `UNSUPPORTED_MEDIA_TYPE` | 该消息类型不支持解密 |
+| `MEDIA_DECRYPT_FAILED` | 媒体解密失败（源文件缺失或密钥不可用） |
+| `INVALID_CURSOR` | 游标失效，需从第一页重来 |
+| `DB_KEY_UNAVAILABLE` / `DB_READ_FAILED` | 数据库密钥不可用 / 读取失败 |
+
 ## 托盘图标
 
 关闭窗口后 WeLens 仍在托盘运行。托盘图标右键可显示悬浮球、启停服务、打开配置、退出。
